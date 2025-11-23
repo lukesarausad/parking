@@ -1,99 +1,57 @@
-import { useEffect, useRef } from 'react'
-import { MapContainer, TileLayer, Marker, Popup, Circle, useMap } from 'react-leaflet'
+import { useEffect } from 'react'
+import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet'
 import L from 'leaflet'
-import { Citation, OfficerLocation, HeatmapData, SEATTLE_BOUNDS, formatCurrency, formatTimestamp } from '@seattle-parking/shared'
+import { OfficerLocation, SEATTLE_BOUNDS, formatTimestamp } from '@seattle-parking/shared'
 
 interface MapProps {
-  citations: Citation[]
   officers: OfficerLocation[]
-  heatmapData: HeatmapData[]
-  selectedCitation: Citation | null
-  onSelectCitation: (citation: Citation | null) => void
-  showHeatmap: boolean
-  showOfficers: boolean
 }
 
-// Custom marker icons
-const citationIcon = new L.DivIcon({
-  className: 'custom-marker',
-  html: `<div style="
-    background: #dc3545;
-    width: 24px;
-    height: 24px;
-    border-radius: 50%;
-    border: 3px solid white;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.3);
-  "></div>`,
-  iconSize: [24, 24],
-  iconAnchor: [12, 12],
-})
+// Custom officer marker icon
+function createOfficerIcon(isActive: boolean) {
+  return new L.DivIcon({
+    className: 'custom-marker officer',
+    html: `<div style="
+      background: ${isActive ? '#00843D' : '#9CA3AF'};
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      border: 3px solid white;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+    ">
+      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+        <circle cx="12" cy="7" r="4"></circle>
+      </svg>
+    </div>`,
+    iconSize: [36, 36],
+    iconAnchor: [18, 18],
+  })
+}
 
-const selectedIcon = new L.DivIcon({
-  className: 'custom-marker selected',
-  html: `<div style="
-    background: #003DA5;
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
-    border: 4px solid white;
-    box-shadow: 0 4px 8px rgba(0,0,0,0.4);
-  "></div>`,
-  iconSize: [32, 32],
-  iconAnchor: [16, 16],
-})
-
-const officerIcon = new L.DivIcon({
-  className: 'custom-marker officer',
-  html: `<div style="
-    background: #00843D;
-    width: 28px;
-    height: 28px;
-    border-radius: 50%;
-    border: 3px solid white;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.3);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: white;
-    font-size: 12px;
-    font-weight: bold;
-  ">O</div>`,
-  iconSize: [28, 28],
-  iconAnchor: [14, 14],
-})
-
-// Component to handle map centering on selected citation
-function MapController({ selectedCitation }: { selectedCitation: Citation | null }) {
+// Component to fit bounds to officers
+function MapBounds({ officers }: { officers: OfficerLocation[] }) {
   const map = useMap()
 
   useEffect(() => {
-    if (selectedCitation) {
-      map.flyTo([selectedCitation.location.lat, selectedCitation.location.lng], 16, {
-        duration: 0.5,
-      })
+    if (officers.length > 0) {
+      const bounds = L.latLngBounds(
+        officers.map(o => [o.location.lat, o.location.lng])
+      )
+      map.fitBounds(bounds, { padding: [50, 50], maxZoom: 15 })
     }
-  }, [selectedCitation, map])
+  }, [officers.length]) // Only re-fit when count changes
 
   return null
 }
 
-export function Map({
-  citations,
-  officers,
-  heatmapData,
-  selectedCitation,
-  onSelectCitation,
-  showHeatmap,
-  showOfficers,
-}: MapProps) {
-  const mapRef = useRef<L.Map | null>(null)
-
-  // Limit displayed citations for performance
-  const displayedCitations = citations.slice(0, 200)
-
+export function Map({ officers }: MapProps) {
   return (
     <MapContainer
-      ref={mapRef}
       center={[SEATTLE_BOUNDS.center.lat, SEATTLE_BOUNDS.center.lng]}
       zoom={13}
       className="h-full w-full"
@@ -104,100 +62,48 @@ export function Map({
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
 
-      <MapController selectedCitation={selectedCitation} />
+      <MapBounds officers={officers} />
 
-      {/* Heatmap circles */}
-      {showHeatmap &&
-        heatmapData.map((point, index) => (
-          <Circle
-            key={`heatmap-${index}`}
-            center={[point.location.lat, point.location.lng]}
-            radius={150}
-            pathOptions={{
-              color: 'transparent',
-              fillColor: `rgba(220, 53, 69, ${point.intensity * 0.6})`,
-              fillOpacity: point.intensity * 0.6,
-            }}
-          />
-        ))}
-
-      {/* Citation markers */}
-      {displayedCitations.map((citation) => (
+      {/* Officer markers */}
+      {officers.map((officer) => (
         <Marker
-          key={citation.id}
-          position={[citation.location.lat, citation.location.lng]}
-          icon={selectedCitation?.id === citation.id ? selectedIcon : citationIcon}
-          eventHandlers={{
-            click: () => onSelectCitation(citation),
-          }}
+          key={officer.id}
+          position={[officer.location.lat, officer.location.lng]}
+          icon={createOfficerIcon(officer.isActive)}
         >
           <Popup>
-            <div className="citation-popup">
-              <h3 className="text-seattle-navy">{citation.violationType}</h3>
-              <div className="detail-row">
-                <span className="text-gray-600">Fine:</span>
-                <span className="font-semibold">{formatCurrency(citation.fineAmount)}</span>
+            <div className="min-w-[180px]">
+              <div className="flex items-center gap-2 mb-2">
+                <div className={`w-3 h-3 rounded-full ${officer.isActive ? 'bg-green-500' : 'bg-gray-400'}`} />
+                <span className="font-semibold">
+                  {officer.isActive ? 'Active' : 'Inactive'}
+                </span>
               </div>
-              <div className="detail-row">
-                <span className="text-gray-600">Time:</span>
-                <span>{formatTimestamp(new Date(citation.timestamp))}</span>
-              </div>
-              <div className="detail-row">
-                <span className="text-gray-600">Location:</span>
-                <span className="text-sm">{citation.location.address || 'N/A'}</span>
-              </div>
-              {citation.location.neighborhood && (
-                <div className="detail-row">
-                  <span className="text-gray-600">Neighborhood:</span>
-                  <span>{citation.location.neighborhood}</span>
+
+              <div className="space-y-1 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Officer ID:</span>
+                  <span className="font-medium">{officer.id}</span>
                 </div>
-              )}
-              {citation.vehicleInfo && (
-                <div className="detail-row">
-                  <span className="text-gray-600">Vehicle:</span>
-                  <span>
-                    {citation.vehicleInfo.color} {citation.vehicleInfo.make}
-                  </span>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Last seen:</span>
+                  <span>{formatTimestamp(new Date(officer.lastSeen))}</span>
                 </div>
-              )}
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Citations today:</span>
+                  <span className="font-medium">{officer.citationsToday}</span>
+                </div>
+                {officer.location.neighborhood && (
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Area:</span>
+                    <span>{officer.location.neighborhood}</span>
+                  </div>
+                )}
+              </div>
             </div>
           </Popup>
         </Marker>
       ))}
-
-      {/* Officer markers */}
-      {showOfficers &&
-        officers.map((officer) => (
-          <Marker
-            key={officer.id}
-            position={[officer.location.lat, officer.location.lng]}
-            icon={officerIcon}
-          >
-            <Popup>
-              <div className="citation-popup">
-                <h3 className="text-seattle-green">Enforcement Officer</h3>
-                <div className="detail-row">
-                  <span className="text-gray-600">ID:</span>
-                  <span>{officer.id}</span>
-                </div>
-                <div className="detail-row">
-                  <span className="text-gray-600">Last Seen:</span>
-                  <span>{formatTimestamp(new Date(officer.lastSeen))}</span>
-                </div>
-                <div className="detail-row">
-                  <span className="text-gray-600">Citations Today:</span>
-                  <span className="font-semibold">{officer.citationsToday}</span>
-                </div>
-                <div className="detail-row">
-                  <span className="text-gray-600">Status:</span>
-                  <span className={officer.isActive ? 'text-green-600' : 'text-gray-400'}>
-                    {officer.isActive ? 'Active' : 'Inactive'}
-                  </span>
-                </div>
-              </div>
-            </Popup>
-          </Marker>
-        ))}
     </MapContainer>
   )
 }

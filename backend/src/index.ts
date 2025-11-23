@@ -5,12 +5,9 @@ import express from 'express';
 import cors from 'cors';
 import { WebSocketServer, WebSocket } from 'ws';
 import http from 'http';
-import { citationsRouter } from './routes/citations';
-import { statisticsRouter } from './routes/statistics';
-import { heatmapRouter } from './routes/heatmap';
 import { officersRouter } from './routes/officers';
 import { DataService } from './services/dataService';
-import { LiveUpdate } from '@seattle-parking/shared';
+import { LiveUpdate, OfficerLocation } from '@seattle-parking/shared';
 
 const PORT = process.env.PORT || 3001;
 const CORS_ORIGIN = process.env.CORS_ORIGIN || 'http://localhost:5173';
@@ -31,10 +28,7 @@ const dataService = new DataService();
 // Make data service available to routes
 app.set('dataService', dataService);
 
-// API Routes
-app.use('/api/citations', citationsRouter);
-app.use('/api/statistics', statisticsRouter);
-app.use('/api/heatmap', heatmapRouter);
+// API Routes - only officers endpoint needed
 app.use('/api/officers', officersRouter);
 
 // Health check
@@ -69,10 +63,30 @@ wss.on('connection', (ws) => {
     timestamp: new Date().toISOString(),
     message: 'Connected to Seattle Parking Tracker live updates'
   }));
+
+  // Send current officer locations immediately
+  sendCurrentOfficers(ws);
 });
 
+async function sendCurrentOfficers(ws: WebSocket) {
+  try {
+    const officers = await dataService.getActiveOfficers();
+    officers.forEach(officer => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          type: 'officer_location',
+          timestamp: new Date().toISOString(),
+          data: officer
+        }));
+      }
+    });
+  } catch (error) {
+    console.error('Error sending initial officers:', error);
+  }
+}
+
 // Broadcast function for live updates
-export function broadcastUpdate(update: LiveUpdate) {
+function broadcastUpdate(update: LiveUpdate) {
   const message = JSON.stringify(update);
   clients.forEach((client) => {
     if (client.readyState === WebSocket.OPEN) {
@@ -81,41 +95,43 @@ export function broadcastUpdate(update: LiveUpdate) {
   });
 }
 
-// Simulate live updates (in production, this would be triggered by real data)
+// Live officer position updates
 let updateInterval: NodeJS.Timeout;
+let previousOfficers: Map<string, OfficerLocation> = new Map();
 
 async function startLiveUpdates() {
   // Initial data fetch
   await dataService.initialize();
 
-  // Periodic updates every 30 seconds
+  // Broadcast officer position updates every 10 seconds
   updateInterval = setInterval(async () => {
     try {
-      const stats = await dataService.getStatistics();
-      const recentCitations = await dataService.getCitations({
-        limit: 5,
-        from: new Date(Date.now() - 5 * 60 * 1000).toISOString() // Last 5 minutes
-      });
+      const officers = await dataService.getActiveOfficers();
 
-      // Broadcast stats update
-      broadcastUpdate({
-        type: 'stats_update',
-        timestamp: new Date(),
-        data: stats
-      });
+      // Broadcast each officer's updated location
+      officers.forEach(officer => {
+        const prev = previousOfficers.get(officer.id);
 
-      // Broadcast any new citations
-      recentCitations.citations.forEach(citation => {
-        broadcastUpdate({
-          type: 'citation',
-          timestamp: new Date(),
-          data: citation
-        });
+        // Only broadcast if position changed or status changed
+        if (!prev ||
+            prev.location.lat !== officer.location.lat ||
+            prev.location.lng !== officer.location.lng ||
+            prev.isActive !== officer.isActive ||
+            prev.citationsToday !== officer.citationsToday) {
+
+          broadcastUpdate({
+            type: 'officer_location',
+            timestamp: new Date(),
+            data: officer
+          });
+        }
+
+        previousOfficers.set(officer.id, officer);
       });
     } catch (error) {
-      console.error('Error fetching live updates:', error);
+      console.error('Error broadcasting officer updates:', error);
     }
-  }, 30000);
+  }, 10000); // Update every 10 seconds
 }
 
 // Graceful shutdown
