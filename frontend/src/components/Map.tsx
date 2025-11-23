@@ -1,59 +1,35 @@
-import { useEffect } from 'react'
-import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet'
-import L from 'leaflet'
-import { OfficerLocation, SEATTLE_BOUNDS, formatTimestamp } from '@seattle-parking/shared'
+import { MapContainer, TileLayer, CircleMarker, Popup, Tooltip } from 'react-leaflet'
+import { SEATTLE_BOUNDS } from '@seattle-parking/shared'
+import { ParkingZone } from '../services/api'
 
 interface MapProps {
-  officers: OfficerLocation[]
+  zones: ParkingZone[]
 }
 
-// Custom officer marker icon
-function createOfficerIcon(isActive: boolean) {
-  return new L.DivIcon({
-    className: 'custom-marker officer',
-    html: `<div style="
-      background: ${isActive ? '#00843D' : '#9CA3AF'};
-      width: 36px;
-      height: 36px;
-      border-radius: 50%;
-      border: 3px solid white;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.4);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: white;
-    ">
-      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
-        <circle cx="12" cy="7" r="4"></circle>
-      </svg>
-    </div>`,
-    iconSize: [36, 36],
-    iconAnchor: [18, 18],
-  })
+// Get color based on risk score
+function getRiskColor(riskScore: number): string {
+  if (riskScore >= 70) return '#dc2626' // red-600
+  if (riskScore >= 50) return '#f97316' // orange-500
+  if (riskScore >= 30) return '#eab308' // yellow-500
+  return '#22c55e' // green-500
 }
 
-// Component to fit bounds to officers
-function MapBounds({ officers }: { officers: OfficerLocation[] }) {
-  const map = useMap()
-
-  useEffect(() => {
-    if (officers.length > 0) {
-      const bounds = L.latLngBounds(
-        officers.map(o => [o.location.lat, o.location.lng])
-      )
-      map.fitBounds(bounds, { padding: [50, 50], maxZoom: 15 })
-    }
-  }, [officers.length]) // Only re-fit when count changes
-
-  return null
+function getEnforcementLabel(level: 'low' | 'medium' | 'high'): string {
+  switch (level) {
+    case 'high':
+      return 'High Enforcement'
+    case 'medium':
+      return 'Moderate Enforcement'
+    default:
+      return 'Lower Enforcement'
+  }
 }
 
-export function Map({ officers }: MapProps) {
+export function Map({ zones }: MapProps) {
   return (
     <MapContainer
       center={[SEATTLE_BOUNDS.center.lat, SEATTLE_BOUNDS.center.lng]}
-      zoom={13}
+      zoom={12}
       className="h-full w-full"
       zoomControl={true}
     >
@@ -62,48 +38,120 @@ export function Map({ officers }: MapProps) {
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
 
-      <MapBounds officers={officers} />
-
-      {/* Officer markers */}
-      {officers.map((officer) => (
-        <Marker
-          key={officer.id}
-          position={[officer.location.lat, officer.location.lng]}
-          icon={createOfficerIcon(officer.isActive)}
+      {/* Risk zone circles */}
+      {zones.map((zone) => (
+        <CircleMarker
+          key={zone.id}
+          center={[zone.location.lat, zone.location.lng]}
+          radius={Math.max(15, zone.riskScore / 3)} // Size based on risk
+          pathOptions={{
+            color: getRiskColor(zone.riskScore),
+            fillColor: getRiskColor(zone.riskScore),
+            fillOpacity: 0.4,
+            weight: 2,
+          }}
         >
+          <Tooltip direction="top" offset={[0, -10]} opacity={0.9}>
+            <div className="font-semibold">{zone.name}</div>
+            <div className="text-sm">Risk Score: {zone.riskScore}</div>
+          </Tooltip>
+
           <Popup>
-            <div className="min-w-[180px]">
-              <div className="flex items-center gap-2 mb-2">
-                <div className={`w-3 h-3 rounded-full ${officer.isActive ? 'bg-green-500' : 'bg-gray-400'}`} />
-                <span className="font-semibold">
-                  {officer.isActive ? 'Active' : 'Inactive'}
-                </span>
+            <div className="min-w-[220px]">
+              <h3 className="font-bold text-lg mb-2" style={{ color: getRiskColor(zone.riskScore) }}>
+                {zone.name}
+              </h3>
+
+              {/* Risk score meter */}
+              <div className="mb-3">
+                <div className="flex justify-between text-sm mb-1">
+                  <span className="text-gray-600">Risk Score</span>
+                  <span className="font-bold" style={{ color: getRiskColor(zone.riskScore) }}>
+                    {zone.riskScore}/100
+                  </span>
+                </div>
+                <div className="w-full bg-gray-200 rounded-full h-2">
+                  <div
+                    className="h-2 rounded-full transition-all"
+                    style={{
+                      width: `${zone.riskScore}%`,
+                      backgroundColor: getRiskColor(zone.riskScore),
+                    }}
+                  />
+                </div>
               </div>
 
-              <div className="space-y-1 text-sm">
+              <div className="space-y-2 text-sm">
                 <div className="flex justify-between">
-                  <span className="text-gray-500">Officer ID:</span>
-                  <span className="font-medium">{officer.id}</span>
+                  <span className="text-gray-500">Enforcement:</span>
+                  <span
+                    className="font-medium"
+                    style={{ color: getRiskColor(zone.riskScore) }}
+                  >
+                    {getEnforcementLabel(zone.enforcementLevel)}
+                  </span>
                 </div>
+
                 <div className="flex justify-between">
-                  <span className="text-gray-500">Last seen:</span>
-                  <span>{formatTimestamp(new Date(officer.lastSeen))}</span>
+                  <span className="text-gray-500">Peak Hours:</span>
+                  <span>{zone.peakHours.join(', ')}</span>
                 </div>
+
                 <div className="flex justify-between">
-                  <span className="text-gray-500">Citations today:</span>
-                  <span className="font-medium">{officer.citationsToday}</span>
+                  <span className="text-gray-500">Avg Occupancy:</span>
+                  <span>{Math.round(zone.avgOccupancy)}%</span>
                 </div>
-                {officer.location.neighborhood && (
-                  <div className="flex justify-between">
-                    <span className="text-gray-500">Area:</span>
-                    <span>{officer.location.neighborhood}</span>
-                  </div>
-                )}
+              </div>
+
+              {/* Advice section */}
+              <div className="mt-3 pt-3 border-t border-gray-200">
+                <p className="text-xs text-gray-600">
+                  {zone.riskScore >= 70 && (
+                    <span className="text-red-600 font-medium">
+                      High risk! Consider a parking garage or moving to a lower-risk area.
+                    </span>
+                  )}
+                  {zone.riskScore >= 40 && zone.riskScore < 70 && (
+                    <span className="text-yellow-600 font-medium">
+                      Moderate risk. Set a timer and watch for enforcement.
+                    </span>
+                  )}
+                  {zone.riskScore < 40 && (
+                    <span className="text-green-600 font-medium">
+                      Lower risk area. Still check signage and time limits.
+                    </span>
+                  )}
+                </p>
               </div>
             </div>
           </Popup>
-        </Marker>
+        </CircleMarker>
       ))}
+
+      {/* Legend */}
+      <div className="leaflet-bottom leaflet-right">
+        <div className="leaflet-control bg-white rounded-lg shadow-lg p-3 m-4">
+          <h4 className="font-semibold text-sm mb-2">Risk Level</h4>
+          <div className="space-y-1 text-xs">
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-red-600" />
+              <span>High (70+)</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-orange-500" />
+              <span>Medium (50-69)</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-yellow-500" />
+              <span>Low (30-49)</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-green-500" />
+              <span>Minimal (&lt;30)</span>
+            </div>
+          </div>
+        </div>
+      </div>
     </MapContainer>
   )
 }

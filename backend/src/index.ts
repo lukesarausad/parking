@@ -6,8 +6,8 @@ import cors from 'cors';
 import { WebSocketServer, WebSocket } from 'ws';
 import http from 'http';
 import { officersRouter } from './routes/officers';
-import { DataService } from './services/dataService';
-import { LiveUpdate, OfficerLocation } from '@seattle-parking/shared';
+import { zonesRouter } from './routes/zones';
+import { DataService, ParkingZone } from './services/dataService';
 
 const PORT = process.env.PORT || 3001;
 const CORS_ORIGIN = process.env.CORS_ORIGIN || 'http://localhost:5173';
@@ -28,15 +28,17 @@ const dataService = new DataService();
 // Make data service available to routes
 app.set('dataService', dataService);
 
-// API Routes - only officers endpoint needed
-app.use('/api/officers', officersRouter);
+// API Routes
+app.use('/api/officers', officersRouter); // Legacy compatibility
+app.use('/api/zones', zonesRouter); // New risk zones API
 
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'healthy',
     timestamp: new Date().toISOString(),
-    version: '1.0.0'
+    version: '2.0.0',
+    realDataLoaded: dataService.isRealDataLoaded(),
   });
 });
 
@@ -61,33 +63,36 @@ wss.on('connection', (ws) => {
   ws.send(JSON.stringify({
     type: 'connected',
     timestamp: new Date().toISOString(),
-    message: 'Connected to Seattle Parking Tracker live updates'
+    message: 'Connected to Seattle Parking Intelligence',
+    realDataLoaded: dataService.isRealDataLoaded(),
   }));
 
-  // Send current officer locations immediately
-  sendCurrentOfficers(ws);
+  // Send current parking zones immediately
+  sendCurrentZones(ws);
 });
 
-async function sendCurrentOfficers(ws: WebSocket) {
+async function sendCurrentZones(ws: WebSocket) {
   try {
-    const officers = await dataService.getActiveOfficers();
-    officers.forEach(officer => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({
-          type: 'officer_location',
-          timestamp: new Date().toISOString(),
-          data: officer
-        }));
-      }
-    });
+    const zones = await dataService.getParkingZones();
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: 'zones_update',
+        timestamp: new Date().toISOString(),
+        data: zones,
+      }));
+    }
   } catch (error) {
-    console.error('Error sending initial officers:', error);
+    console.error('Error sending initial zones:', error);
   }
 }
 
 // Broadcast function for live updates
-function broadcastUpdate(update: LiveUpdate) {
-  const message = JSON.stringify(update);
+function broadcastZones(zones: ParkingZone[]) {
+  const message = JSON.stringify({
+    type: 'zones_update',
+    timestamp: new Date().toISOString(),
+    data: zones,
+  });
   clients.forEach((client) => {
     if (client.readyState === WebSocket.OPEN) {
       client.send(message);
@@ -95,43 +100,22 @@ function broadcastUpdate(update: LiveUpdate) {
   });
 }
 
-// Live officer position updates
+// Live zone updates (risk scores change based on time of day)
 let updateInterval: NodeJS.Timeout;
-let previousOfficers: Map<string, OfficerLocation> = new Map();
 
 async function startLiveUpdates() {
   // Initial data fetch
   await dataService.initialize();
 
-  // Broadcast officer position updates every 10 seconds
+  // Broadcast zone updates every 60 seconds (risk scores may change with time)
   updateInterval = setInterval(async () => {
     try {
-      const officers = await dataService.getActiveOfficers();
-
-      // Broadcast each officer's updated location
-      officers.forEach(officer => {
-        const prev = previousOfficers.get(officer.id);
-
-        // Only broadcast if position changed or status changed
-        if (!prev ||
-            prev.location.lat !== officer.location.lat ||
-            prev.location.lng !== officer.location.lng ||
-            prev.isActive !== officer.isActive ||
-            prev.citationsToday !== officer.citationsToday) {
-
-          broadcastUpdate({
-            type: 'officer_location',
-            timestamp: new Date(),
-            data: officer
-          });
-        }
-
-        previousOfficers.set(officer.id, officer);
-      });
+      const zones = await dataService.getParkingZones();
+      broadcastZones(zones);
     } catch (error) {
-      console.error('Error broadcasting officer updates:', error);
+      console.error('Error broadcasting zone updates:', error);
     }
-  }, 10000); // Update every 10 seconds
+  }, 60000); // Update every minute
 }
 
 // Graceful shutdown
@@ -147,7 +131,7 @@ process.on('SIGTERM', () => {
 
 // Start server
 server.listen(PORT, () => {
-  console.log(`🚗 Seattle Parking Tracker API running on port ${PORT}`);
+  console.log(`🚗 Seattle Parking Intelligence API running on port ${PORT}`);
   console.log(`📡 WebSocket available at ws://localhost:${PORT}/ws/live-updates`);
   startLiveUpdates();
 });

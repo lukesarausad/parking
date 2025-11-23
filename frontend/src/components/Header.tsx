@@ -1,14 +1,29 @@
-import { RefreshCw, Wifi, WifiOff, Users } from 'lucide-react'
+import { RefreshCw, Wifi, WifiOff, AlertTriangle, MapPin, Database } from 'lucide-react'
 
 interface HeaderProps {
   isConnected: boolean
   onRefresh: () => void
-  activeOfficers: number
-  totalOfficers: number
+  highRiskZones: number
+  avgRiskScore: number
+  realDataLoaded: boolean
   loading: boolean
 }
 
-export function Header({ isConnected, onRefresh, activeOfficers, totalOfficers, loading }: HeaderProps) {
+export function Header({
+  isConnected,
+  onRefresh,
+  highRiskZones,
+  avgRiskScore,
+  realDataLoaded,
+  loading,
+}: HeaderProps) {
+  // Determine risk level color
+  const getRiskColor = (score: number) => {
+    if (score >= 60) return 'text-red-400'
+    if (score >= 40) return 'text-yellow-400'
+    return 'text-green-400'
+  }
+
   return (
     <header className="bg-seattle-navy text-white px-4 py-3 shadow-lg">
       <div className="flex items-center justify-between">
@@ -17,33 +32,44 @@ export function Header({ isConnected, onRefresh, activeOfficers, totalOfficers, 
             P
           </div>
           <div>
-            <h1 className="text-xl font-bold">Seattle Parking Tracker</h1>
-            <p className="text-xs text-gray-300">Real-time enforcement officer locations</p>
+            <h1 className="text-xl font-bold">Seattle Parking Intelligence</h1>
+            <p className="text-xs text-gray-300">Real-time enforcement risk analysis</p>
           </div>
         </div>
 
-        <div className="flex items-center gap-4 sm:gap-6">
-          {/* Officer count */}
-          <div className="flex items-center gap-2 bg-white/10 px-3 py-1.5 rounded-lg">
-            <Users size={18} className="text-green-400" />
+        <div className="flex items-center gap-3 sm:gap-5">
+          {/* High risk zones */}
+          <div className="hidden sm:flex items-center gap-2 bg-white/10 px-3 py-1.5 rounded-lg">
+            <AlertTriangle size={16} className="text-red-400" />
             <span className="text-sm">
-              <span className="font-bold text-green-400">{activeOfficers}</span>
-              <span className="text-gray-300 hidden sm:inline"> / {totalOfficers} officers</span>
+              <span className="font-bold text-red-400">{highRiskZones}</span>
+              <span className="text-gray-300"> high risk</span>
             </span>
           </div>
 
-          {/* Live status indicator */}
-          <div className="flex items-center gap-2">
+          {/* Average risk score */}
+          <div className="flex items-center gap-2 bg-white/10 px-3 py-1.5 rounded-lg">
+            <MapPin size={16} className={getRiskColor(avgRiskScore)} />
+            <span className="text-sm">
+              <span className={`font-bold ${getRiskColor(avgRiskScore)}`}>{avgRiskScore}</span>
+              <span className="text-gray-300 hidden sm:inline"> avg risk</span>
+            </span>
+          </div>
+
+          {/* Data source indicator */}
+          <div className="hidden md:flex items-center gap-2">
+            <Database size={14} className={realDataLoaded ? 'text-green-400' : 'text-yellow-400'} />
+            <span className="text-xs text-gray-400">
+              {realDataLoaded ? 'Live data' : 'Baseline'}
+            </span>
+          </div>
+
+          {/* Connection status */}
+          <div className="flex items-center gap-1">
             {isConnected ? (
-              <>
-                <Wifi size={16} className="text-green-400 live-indicator" />
-                <span className="text-sm text-green-400 hidden sm:inline">Live</span>
-              </>
+              <Wifi size={16} className="text-green-400" />
             ) : (
-              <>
-                <WifiOff size={16} className="text-yellow-400" />
-                <span className="text-sm text-yellow-400 hidden sm:inline">Offline</span>
-              </>
+              <WifiOff size={16} className="text-yellow-400" />
             )}
           </div>
 

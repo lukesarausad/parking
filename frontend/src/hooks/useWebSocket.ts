@@ -1,14 +1,23 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { LiveUpdate } from '@seattle-parking/shared'
+import { ParkingZone } from '../services/api'
+
+// Local update type for the frontend
+export interface WebSocketUpdate {
+  type: 'connected' | 'zones_update'
+  timestamp: Date
+  data?: ParkingZone[]
+  message?: string
+  realDataLoaded?: boolean
+}
 
 interface UseWebSocketResult {
-  lastUpdate: LiveUpdate | null
+  lastUpdate: WebSocketUpdate | null
   isConnected: boolean
   reconnect: () => void
 }
 
 export function useWebSocket(): UseWebSocketResult {
-  const [lastUpdate, setLastUpdate] = useState<LiveUpdate | null>(null)
+  const [lastUpdate, setLastUpdate] = useState<WebSocketUpdate | null>(null)
   const [isConnected, setIsConnected] = useState(false)
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null)
@@ -50,15 +59,7 @@ export function useWebSocket(): UseWebSocketResult {
             data.timestamp = new Date(data.timestamp)
           }
 
-          // Parse nested timestamps
-          if (data.data?.timestamp) {
-            data.data.timestamp = new Date(data.data.timestamp)
-          }
-          if (data.data?.lastSeen) {
-            data.data.lastSeen = new Date(data.data.lastSeen)
-          }
-
-          setLastUpdate(data as LiveUpdate)
+          setLastUpdate(data as WebSocketUpdate)
         } catch (error) {
           console.error('Error parsing WebSocket message:', error)
         }

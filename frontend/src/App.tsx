@@ -1,29 +1,30 @@
 import { useState, useEffect, useCallback } from 'react'
-import { OfficerLocation } from '@seattle-parking/shared'
 import { Map } from './components/Map'
 import { Header } from './components/Header'
 import { useWebSocket } from './hooks/useWebSocket'
-import { api } from './services/api'
+import { api, ParkingZone } from './services/api'
 
 function App() {
-  const [officers, setOfficers] = useState<OfficerLocation[]>([])
+  const [zones, setZones] = useState<ParkingZone[]>([])
+  const [realDataLoaded, setRealDataLoaded] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   // WebSocket connection for live updates
   const { lastUpdate, isConnected } = useWebSocket()
 
-  // Fetch officer locations
+  // Fetch parking zones
   const fetchData = useCallback(async () => {
     setLoading(true)
     setError(null)
 
     try {
-      const officersRes = await api.getActiveOfficers(true) // Include all officers
-      setOfficers(officersRes)
+      const response = await api.getZones()
+      setZones(response.zones)
+      setRealDataLoaded(response.realDataLoaded)
     } catch (err) {
       console.error('Error fetching data:', err)
-      setError('Failed to fetch officer locations. Please try again.')
+      setError('Failed to fetch parking zones. Please try again.')
     } finally {
       setLoading(false)
     }
@@ -34,37 +35,27 @@ function App() {
     fetchData()
   }, [fetchData])
 
-  // Refresh every 30 seconds
-  useEffect(() => {
-    const interval = setInterval(fetchData, 30000)
-    return () => clearInterval(interval)
-  }, [fetchData])
-
   // Handle WebSocket updates
   useEffect(() => {
-    if (lastUpdate && lastUpdate.type === 'officer_location') {
-      const updatedOfficer = lastUpdate.data as OfficerLocation
-      setOfficers(prev => {
-        const index = prev.findIndex(o => o.id === updatedOfficer.id)
-        if (index >= 0) {
-          const newOfficers = [...prev]
-          newOfficers[index] = updatedOfficer
-          return newOfficers
-        }
-        return [updatedOfficer, ...prev]
-      })
+    if (lastUpdate && lastUpdate.type === 'zones_update') {
+      setZones(lastUpdate.data as ParkingZone[])
     }
   }, [lastUpdate])
 
-  const activeCount = officers.filter(o => o.isActive).length
+  // Calculate stats
+  const highRiskCount = zones.filter(z => z.enforcementLevel === 'high').length
+  const avgRisk = zones.length > 0
+    ? Math.round(zones.reduce((sum, z) => sum + z.riskScore, 0) / zones.length)
+    : 0
 
   return (
     <div className="flex flex-col h-screen bg-gray-100">
       <Header
         isConnected={isConnected}
         onRefresh={fetchData}
-        activeOfficers={activeCount}
-        totalOfficers={officers.length}
+        highRiskZones={highRiskCount}
+        avgRiskScore={avgRisk}
+        realDataLoaded={realDataLoaded}
         loading={loading}
       />
 
@@ -75,7 +66,13 @@ function App() {
           </div>
         )}
 
-        <Map officers={officers} />
+        {!realDataLoaded && !loading && (
+          <div className="absolute top-4 left-4 z-[1000] bg-yellow-100 border border-yellow-400 text-yellow-800 px-3 py-2 rounded-lg shadow text-sm max-w-xs">
+            <strong>Note:</strong> Using baseline risk estimates. Real-time data unavailable.
+          </div>
+        )}
+
+        <Map zones={zones} />
       </main>
     </div>
   )

@@ -1,21 +1,41 @@
-import {
-  Citation,
-  CitationsQuery,
-  CitationsResponse,
-  Statistics,
-  OfficerLocation,
-  HeatmapData,
-} from '@seattle-parking/shared'
-
 const API_BASE = '/api'
 
-async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
+// Types for the new Parking Intelligence API
+export interface ParkingZone {
+  id: string
+  name: string
+  location: { lat: number; lng: number }
+  neighborhood: string
+  riskScore: number
+  peakHours: string[]
+  avgOccupancy: number
+  enforcementLevel: 'low' | 'medium' | 'high'
+  lastUpdated: string
+}
+
+export interface HourlyPattern {
+  hour: number
+  riskScore: number
+  avgOccupancy: number
+}
+
+export interface NeighborhoodStats {
+  name: string
+  totalSpaces: number
+  avgRiskScore: number
+  peakHour: number
+  enforcementLevel: 'low' | 'medium' | 'high'
+}
+
+export interface ZonesResponse {
+  zones: ParkingZone[]
+  realDataLoaded: boolean
+  timestamp: string
+}
+
+async function fetchJson<T>(url: string): Promise<T> {
   const response = await fetch(url, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...options?.headers,
-    },
+    headers: { 'Content-Type': 'application/json' },
   })
 
   if (!response.ok) {
@@ -25,79 +45,35 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
   return response.json()
 }
 
-function buildQueryString(params: Record<string, string | number | undefined>): string {
-  const searchParams = new URLSearchParams()
-  Object.entries(params).forEach(([key, value]) => {
-    if (value !== undefined && value !== '') {
-      searchParams.append(key, String(value))
-    }
-  })
-  const queryString = searchParams.toString()
-  return queryString ? `?${queryString}` : ''
-}
-
 export const api = {
-  // Citations
-  getCitations: async (query: CitationsQuery = {}): Promise<CitationsResponse> => {
-    const queryString = buildQueryString({
-      from: query.from,
-      to: query.to,
-      type: query.type,
-      neighborhood: query.neighborhood,
-      limit: query.limit,
-      offset: query.offset,
-    })
-    return fetchJson<CitationsResponse>(`${API_BASE}/citations${queryString}`)
+  // Parking Zones (new)
+  getZones: async (): Promise<ZonesResponse> => {
+    return fetchJson<ZonesResponse>(`${API_BASE}/zones`)
   },
 
-  getCitation: async (id: string): Promise<Citation> => {
-    return fetchJson<Citation>(`${API_BASE}/citations/${id}`)
+  getHourlyPatterns: async (): Promise<HourlyPattern[]> => {
+    return fetchJson<HourlyPattern[]>(`${API_BASE}/zones/patterns`)
   },
 
-  // Statistics
-  getStatistics: async (): Promise<Statistics> => {
-    return fetchJson<Statistics>(`${API_BASE}/statistics/today`)
+  getNeighborhoodStats: async (): Promise<NeighborhoodStats[]> => {
+    return fetchJson<NeighborhoodStats[]>(`${API_BASE}/zones/neighborhoods`)
   },
 
-  getStatisticsSummary: async (): Promise<{
-    totalCitations: number
-    totalRevenue: number
-    activeOfficers: number
-    averageFine: number
+  getRiskAtLocation: async (lat: number, lng: number): Promise<{
+    riskScore: number
+    nearestZone: string
+    advice: string
   }> => {
-    return fetchJson(`${API_BASE}/statistics/summary`)
-  },
-
-  getViolationStats: async (): Promise<Statistics['topViolationTypes']> => {
-    return fetchJson(`${API_BASE}/statistics/violations`)
-  },
-
-  getNeighborhoodStats: async (): Promise<Statistics['topNeighborhoods']> => {
-    return fetchJson(`${API_BASE}/statistics/neighborhoods`)
-  },
-
-  getHourlyDistribution: async (): Promise<Statistics['hourlyDistribution']> => {
-    return fetchJson(`${API_BASE}/statistics/hourly`)
-  },
-
-  // Officers
-  getActiveOfficers: async (includeInactive = false): Promise<OfficerLocation[]> => {
-    const queryString = includeInactive ? '?all=true' : ''
-    return fetchJson<OfficerLocation[]>(`${API_BASE}/officers/active${queryString}`)
-  },
-
-  getOfficer: async (id: string): Promise<OfficerLocation> => {
-    return fetchJson<OfficerLocation>(`${API_BASE}/officers/${id}`)
-  },
-
-  // Heatmap
-  getHeatmapData: async (date?: string, neighborhood?: string): Promise<HeatmapData[]> => {
-    const queryString = buildQueryString({ date, neighborhood })
-    return fetchJson<HeatmapData[]>(`${API_BASE}/heatmap${queryString}`)
+    return fetchJson(`${API_BASE}/zones/risk?lat=${lat}&lng=${lng}`)
   },
 
   // Health
-  checkHealth: async (): Promise<{ status: string; timestamp: string; version: string }> => {
+  checkHealth: async (): Promise<{
+    status: string
+    timestamp: string
+    version: string
+    realDataLoaded: boolean
+  }> => {
     return fetchJson(`${API_BASE}/health`)
   },
 }
